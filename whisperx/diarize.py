@@ -1,8 +1,9 @@
 import numpy as np
 import pandas as pd
-from pyannote.audio import Pipeline
+from whisperx.diarizen_pipeline import DiarizenPipelineWrapper
 from typing import Optional, Union
 import torch
+from pathlib import Path
 
 from whisperx.audio import load_audio, SAMPLE_RATE
 from whisperx.types import TranscriptionResult, AlignedTranscriptionResult
@@ -11,14 +12,19 @@ from whisperx.types import TranscriptionResult, AlignedTranscriptionResult
 class DiarizationPipeline:
     def __init__(
         self,
-        model_name=None,
+        model_name="BUT-FIT/diarizen-wavlm-large-s80-md",
         use_auth_token=None,
         device: Optional[Union[str, torch.device]] = "cpu",
+        rttm_out_dir: Optional[str] = None,
     ):
         if isinstance(device, str):
             device = torch.device(device)
-        model_config = model_name or "pyannote/speaker-diarization-3.1"
-        self.model = Pipeline.from_pretrained(model_config, use_auth_token=use_auth_token).to(device)
+        self.model = DiarizenPipelineWrapper(
+            model_name=model_name,
+            use_auth_token=use_auth_token,
+            device=device,
+            rttm_out_dir=rttm_out_dir
+        )
 
     def __call__(
         self,
@@ -45,38 +51,27 @@ class DiarizationPipeline:
                 Just the diarization dataframe
         """
         if isinstance(audio, str):
-            audio = load_audio(audio)
-        audio_data = {
-            'waveform': torch.from_numpy(audio[None, :]),
-            'sample_rate': SAMPLE_RATE
-        }
-
-        if return_embeddings:
-            diarization, embeddings = self.model(
-                audio_data,
-                num_speakers=num_speakers,
-                min_speakers=min_speakers,
-                max_speakers=max_speakers,
-                return_embeddings=True,
-            )
+            audio_path = audio
+            audio_input = load_audio(audio_path)
+        elif isinstance(audio, np.ndarray):
+            audio_input = audio
+            audio_path = "audio_from_array"
         else:
-            diarization = self.model(
-                audio_data,
-                num_speakers=num_speakers,
-                min_speakers=min_speakers,
-                max_speakers=max_speakers,
-            )
-            embeddings = None
+            raise TypeError("audio must be a path to an audio file or a numpy array")
+
+        sess_name = Path(audio_path).stem
+
+        diarization = self.model(
+            audio_input,
+            min_speakers=min_speakers,
+            max_speakers=max_speakers,
+            sess_name=sess_name,
+        )
 
         diarize_df = pd.DataFrame(diarization.itertracks(yield_label=True), columns=['segment', 'label', 'speaker'])
         diarize_df['start'] = diarize_df['segment'].apply(lambda x: x.start)
         diarize_df['end'] = diarize_df['segment'].apply(lambda x: x.end)
 
-        if return_embeddings and embeddings is not None:
-            speaker_embeddings = {speaker: embeddings[s].tolist() for s, speaker in enumerate(diarization.labels())}
-            return diarize_df, speaker_embeddings
-        
-        # For backwards compatibility
         if return_embeddings:
             return diarize_df, None
         else:
