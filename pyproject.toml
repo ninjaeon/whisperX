@@ -10,7 +10,7 @@ license = { text = "BSD-2-Clause" }
 
 dependencies = [
     "ctranslate2>=4.5.0",
-    "faster-whisper=1.2.0",
+    "faster-whisper>=1.2.0",
     "nltk>=3.9.1",
     # Restrict numpy, onnxruntime, pandas to be compatible with Python 3.9
     "numpy>=2.0.2,<2.1.0",
