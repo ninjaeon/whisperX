@@ -207,7 +207,7 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
         print(">>Performing diarization...")
         print(">>Using model:", diarize_model_name)
         results = []
-        diarize_model = DiarizationPipeline(model_name=diarize_model_name, device=device)
+        diarize_model = DiarizationPipeline(model_name=diarize_model_name)
         for result, input_audio_path in tmp_results:
             diarize_result = diarize_model(
                 input_audio_path, 
