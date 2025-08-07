@@ -50,9 +50,7 @@ class DiariZenPipeline(SpeakerDiarizationPipeline):
             yaml.dump(config, f)
 
         super().__init__(
-            seg_duration=inference_config["seg_duration"],
             segmentation=str(Path(diarizen_hub / "pytorch_model.bin")),
-            segmentation_step=inference_config["segmentation_step"],
             embedding=embedding_model,
             embedding_exclude_overlap=True,
             clustering=clustering_config["method"],     
