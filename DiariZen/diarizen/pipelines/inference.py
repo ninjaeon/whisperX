@@ -61,6 +61,8 @@ class DiariZenPipeline(SpeakerDiarizationPipeline):
             embedding_batch_size=inference_config["batch_size"],
             segmentation_batch_size=inference_config["batch_size"],
         )
+        self._segmentation.duration = inference_config["seg_duration"]
+        self._segmentation.step = inference_config["segmentation_step"] * self._segmentation.duration
 
         self.apply_median_filtering = inference_config["apply_median_filtering"]
         self.min_speakers = clustering_config["min_speakers"]
