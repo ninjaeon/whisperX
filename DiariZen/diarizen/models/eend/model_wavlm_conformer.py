@@ -43,8 +43,7 @@ class Model(BaseModel):
         sample_rate: int = 16000,
     ):
         super().__init__(
-            num_channels=num_channels,
-            max_speakers_per_chunk=max_speakers_per_chunk
+            num_channels=num_channels
         )
         
         self.chunk_size = chunk_size
