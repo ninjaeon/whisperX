@@ -44,17 +44,15 @@ class DiariZenPipeline(SpeakerDiarizationPipeline):
         print(f'Loaded configuration: {config}')
 
         super().__init__(
-            config=config,
-            seg_duration=inference_config["seg_duration"],
             segmentation=str(Path(diarizen_hub / "pytorch_model.bin")),
-            segmentation_step=inference_config["segmentation_step"],
             embedding=embedding_model,
             embedding_exclude_overlap=True,
-            clustering=clustering_config["method"],     
+            clustering=clustering_config["method"],
             embedding_batch_size=inference_config["batch_size"],
             segmentation_batch_size=inference_config["batch_size"],
-            device=torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
         )
+        self._segmentation.duration = inference_config["seg_duration"]
+        self._segmentation.step = inference_config["segmentation_step"] * self._segmentation.duration
 
         self.apply_median_filtering = inference_config["apply_median_filtering"]
         self.min_speakers = clustering_config["min_speakers"]
