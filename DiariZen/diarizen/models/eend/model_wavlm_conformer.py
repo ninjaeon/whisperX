@@ -12,7 +12,7 @@ import torch.nn as nn
 from functools import lru_cache
 
 from pyannote.audio.core.model import Model as BaseModel
-from pyannote.audio.core.model import (
+from pyannote.audio.utils.receptive_field import (
     multi_conv_num_frames, 
     multi_conv_receptive_field_size, 
     multi_conv_receptive_field_center
@@ -38,11 +38,15 @@ class Model(BaseModel):
         output_activate_function: str = False,
         max_speakers_per_chunk: int = 4,
         chunk_size: int = 5,
-        num_channels: int = 1,
+        num_channels: int = 8,
         selected_channel: int = 0,
         sample_rate: int = 16000,
     ):
-        super().__init__()
+        super().__init__(
+            num_channels=num_channels,
+            duration=chunk_size,
+            max_speakers_per_chunk=max_speakers_per_chunk
+        )
         
         self.chunk_size = chunk_size
         self.sample_rate = sample_rate

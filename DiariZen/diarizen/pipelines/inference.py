@@ -6,7 +6,6 @@ import argparse
 import os
 from pathlib import Path
 from typing import Optional, Dict, Any
-import importlib
 
 import toml
 import numpy as np
@@ -25,7 +24,7 @@ from diarizen.pipelines.utils import scp2path
 
 class DiariZenPipeline(SpeakerDiarizationPipeline):
     def __init__(
-        self,
+        self, 
         diarizen_hub,
         embedding_model,
         config_parse: Optional[Dict[str, Any]] = None,
@@ -38,31 +37,24 @@ class DiariZenPipeline(SpeakerDiarizationPipeline):
             print('Overriding with parsed config.')
             config["inference"]["args"] = config_parse["inference"]["args"]
             config["clustering"]["args"] = config_parse["clustering"]["args"]
-
+       
         inference_config = config["inference"]["args"]
         clustering_config = config["clustering"]["args"]
-
+        
         print(f'Loaded configuration: {config}')
 
-        module_name, class_name = config["model"]["path"].rsplit(".", 1)
-        ModelClass = getattr(importlib.import_module(module_name), class_name)
-        model_args = config["model"]["args"]
-        model = ModelClass(**model_args)
-
-        # Load the state dict
-        model.load_state_dict(torch.load(str(Path(diarizen_hub / "pytorch_model.bin"))))
-
         super().__init__(
-            segmentation=model,
+            config=config,
+            seg_duration=inference_config["seg_duration"],
+            segmentation=str(Path(diarizen_hub / "pytorch_model.bin")),
             segmentation_step=inference_config["segmentation_step"],
             embedding=embedding_model,
             embedding_exclude_overlap=True,
-            clustering=clustering_config["method"],
+            clustering=clustering_config["method"],     
             embedding_batch_size=inference_config["batch_size"],
             segmentation_batch_size=inference_config["batch_size"],
+            device=torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
         )
-        self._segmentation.duration = inference_config["seg_duration"]
-        self._segmentation.step = inference_config["segmentation_step"] * self._segmentation.duration
 
         self.apply_median_filtering = inference_config["apply_median_filtering"]
         self.min_speakers = clustering_config["min_speakers"]
@@ -101,8 +93,8 @@ class DiariZenPipeline(SpeakerDiarizationPipeline):
 
     @classmethod
     def from_pretrained(
-        cls,
-        repo_id: str,
+        cls, 
+        repo_id: str, 
         cache_dir: str = None,
         rttm_out_dir: str = None,
     ) -> "DiariZenPipeline":
@@ -128,9 +120,9 @@ class DiariZenPipeline(SpeakerDiarizationPipeline):
     def __call__(self, in_wav, sess_name=None):
         assert isinstance(in_wav, (str, ProtocolFile)), "input must be either a str or a ProtocolFile"
         in_wav = in_wav if not isinstance(in_wav, ProtocolFile) else in_wav['audio']
-
+        
         print('Extracting segmentations.')
-        waveform, sample_rate = torchaudio.load(in_wav)
+        waveform, sample_rate = torchaudio.load(in_wav) 
         waveform = torch.unsqueeze(waveform[0], 0)      # force to use the SDM data
         segmentations = self.get_segmentations({"waveform": waveform, "sample_rate": sample_rate}, soft=False)
 
@@ -159,7 +151,7 @@ class DiariZenPipeline(SpeakerDiarizationPipeline):
         hard_clusters, _, _ = self.clustering(
             embeddings=embeddings,
             segmentations=binarized_segmentations,
-            min_clusters=self.min_speakers,
+            min_clusters=self.min_speakers,  
             max_clusters=self.max_speakers
         )
 
@@ -189,14 +181,14 @@ class DiariZenPipeline(SpeakerDiarizationPipeline):
         )
         result = to_annotation(discrete_diarization)
         result.uri = sess_name
-
+        
         if self.rttm_out_dir is not None:
             assert sess_name is not None
             rttm_out = os.path.join(self.rttm_out_dir, sess_name + ".rttm")
             with open(rttm_out, "w") as f:
                 f.write(result.to_rttm())
         return result
-
+    
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
