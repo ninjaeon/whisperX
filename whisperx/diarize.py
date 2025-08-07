@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+import pyannote.audio
+print(f"pyannote.audio version: {pyannote.audio.__version__}")
 from whisperx.diarizen_pipeline import DiarizenPipelineWrapper
 from typing import Optional, Union
 import torch

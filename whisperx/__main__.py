@@ -9,6 +9,8 @@ from whisperx.utils import (LANGUAGES, TO_LANGUAGE_CODE, optional_float,
 
 
 def cli():
+    import pyannote.audio
+    print(f"pyannote.audio version: {pyannote.audio.__version__}")
     # fmt: off
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("audio", nargs="+", type=str, help="audio file(s) to transcribe")
