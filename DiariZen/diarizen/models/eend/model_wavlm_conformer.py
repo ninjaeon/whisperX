@@ -44,7 +44,6 @@ class Model(BaseModel):
     ):
         super().__init__(
             num_channels=num_channels,
-            duration=chunk_size,
             max_speakers_per_chunk=max_speakers_per_chunk
         )
         
