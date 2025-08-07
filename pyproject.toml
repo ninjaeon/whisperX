@@ -19,8 +19,8 @@ dependencies = [
     "torch>=2.7.1",
     "torchaudio",
     "transformers>=4.48.0",
-    "triton>=3.3.0; sys_platform == 'linux'" # only install triton on Linux
-    "asteroid-filterbanks >=0.4",
+    "triton>=3.3.0; sys_platform == 'linux'", # only install triton on Linux
+    "asteroid-filterbanks>=0.4",
     "einops >=0.6.0",
     "huggingface_hub >= 0.13.0",
     "lightning >= 2.0.1",
