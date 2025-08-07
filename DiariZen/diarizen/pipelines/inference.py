@@ -6,7 +6,6 @@ import argparse
 import os
 from pathlib import Path
 from typing import Optional, Dict, Any
-import importlib
 
 import toml
 import numpy as np
@@ -44,24 +43,18 @@ class DiariZenPipeline(SpeakerDiarizationPipeline):
 
         print(f'Loaded configuration: {config}')
 
-        module_name, class_name = config["model"]["path"].rsplit(".", 1)
-        ModelClass = getattr(importlib.import_module(module_name), class_name)
-        model_args = config["model"]["args"]
-        model = ModelClass(**model_args)
-
-        # Load the state dict
-        model.load_state_dict(torch.load(str(Path(diarizen_hub / "pytorch_model.bin"))))
-
         super().__init__(
-            segmentation=model, # Pass the loaded model directly
+            config=config,
+            seg_duration=inference_config["seg_duration"],
+            segmentation=str(Path(diarizen_hub / "pytorch_model.bin")),
+            segmentation_step=inference_config["segmentation_step"],
             embedding=embedding_model,
             embedding_exclude_overlap=True,
             clustering=clustering_config["method"],
             embedding_batch_size=inference_config["batch_size"],
             segmentation_batch_size=inference_config["batch_size"],
+            device=torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
         )
-        self._segmentation.duration = inference_config["seg_duration"]
-        self._segmentation.step = inference_config["segmentation_step"] * self._segmentation.duration
 
         self.apply_median_filtering = inference_config["apply_median_filtering"]
         self.min_speakers = clustering_config["min_speakers"]
