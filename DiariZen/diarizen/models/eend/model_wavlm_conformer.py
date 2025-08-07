@@ -12,7 +12,7 @@ import torch.nn as nn
 from functools import lru_cache
 
 from pyannote.audio.core.model import Model as BaseModel
-from pyannote.audio.core.model import (
+from pyannote.audio.utils.receptive_field import (
     multi_conv_num_frames, 
     multi_conv_receptive_field_size, 
     multi_conv_receptive_field_center
