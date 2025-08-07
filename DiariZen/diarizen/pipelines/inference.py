@@ -55,8 +55,7 @@ class DiariZenPipeline(SpeakerDiarizationPipeline):
             embedding_exclude_overlap=True,
             clustering=clustering_config["method"],     
             embedding_batch_size=inference_config["batch_size"],
-            segmentation_batch_size=inference_config["batch_size"],
-            device=torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+            segmentation_batch_size=inference_config["batch_size"]
         )
 
         self.apply_median_filtering = inference_config["apply_median_filtering"]
