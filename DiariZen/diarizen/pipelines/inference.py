@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 import toml
+import yaml
 import numpy as np
 import torch
 import torchaudio
@@ -43,8 +44,12 @@ class DiariZenPipeline(SpeakerDiarizationPipeline):
         
         print(f'Loaded configuration: {config}')
 
+        # Save config as yaml for pyannote
+        yaml_path = Path(diarizen_hub) / "config.yaml"
+        with open(yaml_path, "w") as f:
+            yaml.dump(config, f)
+
         super().__init__(
-            config=config,
             seg_duration=inference_config["seg_duration"],
             segmentation=str(Path(diarizen_hub / "pytorch_model.bin")),
             segmentation_step=inference_config["segmentation_step"],
