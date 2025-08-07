@@ -38,14 +38,12 @@ class Model(BaseModel):
         output_activate_function: str = False,
         max_speakers_per_chunk: int = 4,
         chunk_size: int = 5,
-        num_channels: int = 8,
+        num_channels: int = 1,
         selected_channel: int = 0,
         sample_rate: int = 16000,
     ):
         super().__init__(
-            num_channels=num_channels,
-            duration=chunk_size,
-            max_speakers_per_chunk=max_speakers_per_chunk
+            num_channels=num_channels
         )
         
         self.chunk_size = chunk_size
