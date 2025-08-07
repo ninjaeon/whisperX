@@ -13,7 +13,6 @@ class DiarizationPipeline:
     def __init__(
         self,
         model_name="BUT-FIT/diarizen-wavlm-large-s80-md",
-        use_auth_token=None,
         device: Optional[Union[str, torch.device]] = "cpu",
         rttm_out_dir: Optional[str] = None,
     ):
@@ -21,7 +20,6 @@ class DiarizationPipeline:
             device = torch.device(device)
         self.model = DiarizenPipelineWrapper(
             model_name=model_name,
-            use_auth_token=use_auth_token,
             device=device,
             rttm_out_dir=rttm_out_dir
         )
