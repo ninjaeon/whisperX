@@ -43,8 +43,16 @@ class DiariZenPipeline(SpeakerDiarizationPipeline):
         
         print(f'Loaded configuration: {config}')
 
+        module_name, class_name = config["model"]["path"].rsplit(".", 1)
+        ModelClass = getattr(importlib.import_module(module_name), class_name)
+        model_args = config["model"]["args"]
+        model = ModelClass(**model_args)
+
+        # Load the state dict
+        model.load_state_dict(torch.load(str(Path(diarizen_hub / "pytorch_model.bin"))))
+
         super().__init__(
-            segmentation=str(Path(diarizen_hub / "pytorch_model.bin")),
+            segmentation=model, # Pass the loaded model directly
             embedding=embedding_model,
             embedding_exclude_overlap=True,
             clustering=clustering_config["method"],
