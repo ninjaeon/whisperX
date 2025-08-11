@@ -17,8 +17,12 @@ from scipy.ndimage import median_filter
 
 from huggingface_hub import snapshot_download, hf_hub_download
 from pyannote.audio.pipelines import SpeakerDiarization as SpeakerDiarizationPipeline
+from pyannote.audio.pipelines.clustering import Clustering
+from pyannote.audio.pipelines.speaker_verification import PretrainedSpeakerEmbedding
+from pyannote.audio import Audio, Pipeline
 from pyannote.audio.utils.signal import Binarize
 from pyannote.database.protocol.protocol import ProtocolFile
+from pyannote.audio.core.inference import Inference
 
 from diarizen.pipelines.utils import scp2path
 
@@ -40,7 +44,8 @@ class DiariZenPipeline(SpeakerDiarizationPipeline):
             config["clustering"]["args"] = config_parse["clustering"]["args"]
        
         inference_config = config["inference"]["args"]
-        clustering_config = config["clustering"]["args"]
+        # clustering args may be partially missing in overrides; use safe defaults
+        clustering_args = config.get("clustering", {}).get("args", {})
         
         print(f'Loaded configuration: {config}')
 
@@ -49,49 +54,114 @@ class DiariZenPipeline(SpeakerDiarizationPipeline):
         with open(yaml_path, "w") as f:
             yaml.dump(config, f)
 
-        super().__init__(
-            segmentation=str(Path(diarizen_hub / "pytorch_model.bin")),
-            embedding=embedding_model,
-            embedding_exclude_overlap=True,
-            clustering=clustering_config["method"],     
-            embedding_batch_size=inference_config["batch_size"],
-            segmentation_batch_size=inference_config["batch_size"]
+        # IMPORTANT: Do not call SpeakerDiarization.__init__ as it would try to
+        # download a gated pyannote/segmentation model. We initialize the base
+        # Pipeline directly and set up only the components we actually use
+        # (embedding + clustering). Segmentation is performed by DiariZen below.
+        Pipeline.__init__(self)
+
+        # mirror key attributes used by SpeakerDiarization
+        self.embedding = embedding_model
+        self.embedding_batch_size = inference_config["batch_size"]
+        self.embedding_exclude_overlap = True
+        method = clustering_args.get("method", "VBxClustering")
+        self.klustering = method
+        # device selection: prefer CUDA if available
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Accuracy preference: disable TF32 on CUDA
+        if self.device.type == "cuda":
+            try:
+                torch.backends.cuda.matmul.allow_tf32 = False
+                torch.backends.cudnn.allow_tf32 = False
+            except Exception:
+                pass
+
+        # set up speaker embeddings
+        self._embedding = PretrainedSpeakerEmbedding(
+            self.embedding, device=self.device, use_auth_token=None
         )
+        self._audio = Audio(sample_rate=self._embedding.sample_rate, mono="downmix")
+        metric = self._embedding.metric
+
+        # set up clustering
+        Klustering = Clustering[self.klustering]
+        self.clustering = Klustering.value(metric=metric)
 
         self.apply_median_filtering = inference_config["apply_median_filtering"]
-        self.min_speakers = clustering_config["min_speakers"]
-        self.max_speakers = clustering_config["max_speakers"]
+        self.min_speakers = clustering_args.get("min_speakers", 1)
+        self.max_speakers = clustering_args.get("max_speakers", 20)
 
-        if clustering_config["method"] == "AgglomerativeClustering":
+        if method == "AgglomerativeClustering":
             self.PIPELINE_PARAMS = {
                 "clustering": {
                     "method": "centroid",
-                    "min_cluster_size": clustering_config["min_cluster_size"],
-                    "threshold": clustering_config["ahc_threshold"],
+                    "min_cluster_size": clustering_args.get("min_cluster_size", 2),
+                    "threshold": clustering_args.get("ahc_threshold", 0.6),
                 }
             }
-        elif clustering_config["method"] == "VBxClustering":
+        elif method == "VBxClustering":
             self.PIPELINE_PARAMS = {
                 "clustering": {
-                    "ahc_criterion": clustering_config["ahc_criterion"],
-                    "ahc_threshold": clustering_config["ahc_threshold"],
-                    "Fa": clustering_config["Fa"],
-                    "Fb": clustering_config["Fb"],
+                    "ahc_criterion": clustering_args.get("ahc_criterion", "distance"),
+                    "ahc_threshold": clustering_args.get("ahc_threshold", 0.6),
+                    "Fa": clustering_args.get("Fa", 0.07),
+                    "Fb": clustering_args.get("Fb", 0.8),
                 }
             }
             self.clustering.plda_dir = str(Path(diarizen_hub / "plda"))
-            self.clustering.lda_dim = clustering_config["lda_dim"]
-            self.clustering.maxIters = clustering_config["max_iters"]
+            self.clustering.lda_dim = clustering_args.get("lda_dim", 128)
+            self.clustering.maxIters = clustering_args.get("max_iters", 20)
         else:
-            raise ValueError(f"Unsupported clustering method: {clustering_config['method']}")
+            raise ValueError(f"Unsupported clustering method: {method}")
 
         self.instantiate(self.PIPELINE_PARAMS)
+
+        # ---------- DiariZen EEND model init ----------
+        def _import_string(path: str):
+            module, cls = path.rsplit('.', 1)
+            mod = __import__(module, fromlist=[cls])
+            return getattr(mod, cls)
+
+        model_cfg = config["model"]
+        ModelClass = _import_string(model_cfg["path"])
+        self.eend_model = ModelClass(**model_cfg["args"])  # subclass of pyannote Model
+
+        # load checkpoint(s)
+        root_bin = Path(diarizen_hub) / "pytorch_model.bin"
+        try:
+            if root_bin.is_file():
+                state = torch.load(root_bin.as_posix(), map_location="cpu")
+                self.eend_model.load_state_dict(state, strict=False)
+            else:
+                # try averaging checkpoints if available
+                from diarizen.ckpt_utils import average_ckpt
+                self.eend_model = average_ckpt(diarizen_hub, self.eend_model, wavlm_only=False)
+        except Exception as e:
+            print(f"Warning: failed to load DiariZen checkpoint: {e}")
+
+        self.eend_model.to(self.device).eval()
+
+        # create inference helper to handle sliding windows and overlap-add
+        self._dz_inference = Inference(
+            self.eend_model,
+            window="sliding",
+            duration=inference_config["seg_duration"],
+            step=inference_config["segmentation_step"],
+            batch_size=inference_config["batch_size"],
+            device=self.device,
+            skip_aggregation=False,
+        )
 
         if rttm_out_dir is not None:
             os.makedirs(rttm_out_dir, exist_ok=True)
         self.rttm_out_dir = rttm_out_dir
 
-        assert self._segmentation.model.specifications.powerset is True
+        # Segmentation is powered by DiariZen EEND and outputs powerset labels
+        # directly; no assertion on pyannote segmentation model needed here.
+
+    # override segmentation to avoid pyannote's _segmentation
+    def get_segmentations(self, file, hook=None, soft=False):
+        return self._dz_inference(file)
 
     @classmethod
     def from_pretrained(
@@ -99,6 +169,7 @@ class DiariZenPipeline(SpeakerDiarizationPipeline):
         repo_id: str, 
         cache_dir: str = None,
         rttm_out_dir: str = None,
+        config_parse: Optional[Dict[str, Any]] = None,
     ) -> "DiariZenPipeline":
         diarizen_hub = snapshot_download(
             repo_id=repo_id,
@@ -116,16 +187,39 @@ class DiariZenPipeline(SpeakerDiarizationPipeline):
         return cls(
             diarizen_hub=Path(diarizen_hub).expanduser().absolute(),
             embedding_model=embedding_model,
-            rttm_out_dir=rttm_out_dir
+            rttm_out_dir=rttm_out_dir,
+            config_parse=config_parse,
         )
 
     def __call__(self, in_wav, sess_name=None):
-        assert isinstance(in_wav, (str, ProtocolFile)), "input must be either a str or a ProtocolFile"
-        in_wav = in_wav if not isinstance(in_wav, ProtocolFile) else in_wav['audio']
-        
-        print('Extracting segmentations.')
-        waveform, sample_rate = torchaudio.load(in_wav) 
-        waveform = torch.unsqueeze(waveform[0], 0)      # force to use the SDM data
+        # Accept path/ProtocolFile or raw numpy array
+        if isinstance(in_wav, (str, ProtocolFile)):
+            in_wav = in_wav if not isinstance(in_wav, ProtocolFile) else in_wav['audio']
+            print('Extracting segmentations.')
+            waveform, sample_rate = torchaudio.load(in_wav)
+            # force mono: use first channel
+            if waveform.dim() == 2 and waveform.size(0) > 1:
+                waveform = waveform[:1, :]
+        elif isinstance(in_wav, np.ndarray):
+            print('Extracting segmentations (ndarray input).')
+            arr = in_wav
+            if arr.ndim == 1:
+                arr = arr[None, :]
+            elif arr.ndim == 2 and arr.shape[0] > 1:
+                arr = arr[:1, :]
+            waveform = torch.from_numpy(arr.astype(np.float32))
+            # WhisperX uses 16 kHz throughout; fallback to 16000 for array input
+            sample_rate = 16000
+        else:
+            raise TypeError("input must be either a str, ProtocolFile, or numpy.ndarray")
+
+        # ensure shape [1, T]
+        if waveform.dim() == 2 and waveform.size(0) == 1:
+            pass
+        elif waveform.dim() == 1:
+            waveform = waveform[None, :]
+        else:
+            waveform = waveform[:1, :]
         segmentations = self.get_segmentations({"waveform": waveform, "sample_rate": sample_rate}, soft=False)
 
         if self.apply_median_filtering:
@@ -137,7 +231,7 @@ class DiariZenPipeline(SpeakerDiarizationPipeline):
         # estimate frame-level number of instantaneous speakers
         count = self.speaker_count(
             binarized_segmentations,
-            self._segmentation.model._receptive_field,
+            self.eend_model._receptive_field,
             warm_up=(0.0, 0.0),
         )
 

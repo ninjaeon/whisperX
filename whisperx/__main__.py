@@ -1,6 +1,28 @@
 import argparse
 import importlib.metadata
 import platform
+import sys
+from pathlib import Path
+import inspect
+
+# Ensure vendored dependencies (pyannote) are imported from the repo first.
+# This avoids accidentally importing site-packages versions that are incompatible
+# with DiariZen's checkpoints and pipelines.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_VENDORED_PYANNOTE_ROOT = _REPO_ROOT / "pyannote"
+if _VENDORED_PYANNOTE_ROOT.exists():
+    # Ensure order: [vendored pyannote, repo root, ...others]
+    def _ensure_sys_path_order(paths):
+        # remove any existing occurrences first
+        for p in paths:
+            try:
+                sys.path.remove(str(p))
+            except ValueError:
+                pass
+        # insert in correct order
+        sys.path.insert(0, str(_REPO_ROOT))
+        sys.path.insert(0, str(_VENDORED_PYANNOTE_ROOT))
+    _ensure_sys_path_order([_VENDORED_PYANNOTE_ROOT, _REPO_ROOT])
 
 import torch
 
@@ -9,8 +31,33 @@ from whisperx.utils import (LANGUAGES, TO_LANGUAGE_CODE, optional_float,
 
 
 def cli():
-    import pyannote.audio
+    try:
+        import pyannote.audio
+    except ModuleNotFoundError:
+        # Fallback: ensure vendored path is present and retry
+        # enforce correct order again on fallback
+        for p in (str(_VENDORED_PYANNOTE_ROOT), str(_REPO_ROOT)):
+            try:
+                sys.path.remove(p)
+            except ValueError:
+                pass
+        sys.path.insert(0, str(_REPO_ROOT))
+        sys.path.insert(0, str(_VENDORED_PYANNOTE_ROOT))
+        import importlib
+        importlib.invalidate_caches()
+        # If a conflicting top-level 'pyannote' was already imported without 'audio', remove it
+        if 'pyannote' in sys.modules and not hasattr(sys.modules['pyannote'], 'audio'):
+            del sys.modules['pyannote']
+        print("[whisperx] Fallback activated. sys.path head:")
+        for p in sys.path[:5]:
+            print("  -", p)
+        import pyannote.audio
     print(f"pyannote.audio version: {pyannote.audio.__version__}")
+    try:
+        print(f"pyannote.audio module: {inspect.getfile(pyannote.audio)}")
+    except Exception:
+        # Some namespace packages may not have a __file__
+        print("pyannote.audio module: <unknown>")
     # fmt: off
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("audio", nargs="+", type=str, help="audio file(s) to transcribe")
@@ -45,7 +92,7 @@ def cli():
     parser.add_argument("--diarize", action="store_true", help="Apply diarization to assign speaker labels to each segment/word")
     parser.add_argument("--min_speakers", default=None, type=int, help="Minimum number of speakers to in audio file")
     parser.add_argument("--max_speakers", default=None, type=int, help="Maximum number of speakers to in audio file")
-    parser.add_argument("--diarize_model", default="BUT-FIT/diarizen-wavlm-large-s80-md", type=str, help="Name of the speaker diarization model to use")
+    parser.add_argument("--diarize_model", default="BUT-FIT/diarizen-wavlm-base-s80-md", type=str, help="Name of the speaker diarization model to use")
     parser.add_argument("--speaker_embeddings", action="store_true", help="Include speaker embeddings in JSON output (only works with --diarize)")
 
     parser.add_argument("--temperature", type=float, default=0, help="temperature to use for sampling")

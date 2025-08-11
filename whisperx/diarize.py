@@ -14,7 +14,7 @@ from whisperx.types import TranscriptionResult, AlignedTranscriptionResult
 class DiarizationPipeline:
     def __init__(
         self,
-        model_name="BUT-FIT/diarizen-wavlm-large-s80-md",
+        model_name="BUT-FIT/diarizen-wavlm-base-s80-md",
         rttm_out_dir: Optional[str] = None,
         **kwargs,
     ):
@@ -68,6 +68,11 @@ class DiarizationPipeline:
         diarize_df = pd.DataFrame(diarization.itertracks(yield_label=True), columns=['segment', 'label', 'speaker'])
         diarize_df['start'] = diarize_df['segment'].apply(lambda x: x.start)
         diarize_df['end'] = diarize_df['segment'].apply(lambda x: x.end)
+        # Ensure JSON-safe speaker labels (avoid numpy int64). Use string labels like "SPEAKER_0".
+        try:
+            diarize_df['speaker'] = diarize_df['speaker'].apply(lambda s: f"SPEAKER_{int(s)}")
+        except Exception:
+            diarize_df['speaker'] = diarize_df['speaker'].astype(str)
 
         if return_embeddings:
             return diarize_df, None
